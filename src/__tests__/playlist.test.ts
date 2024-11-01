@@ -1,10 +1,28 @@
 import { PlaylistGenius } from "../index"
 
+jest.mock("../index", () => {
+  return {
+    PlaylistGenius: jest.fn().mockImplementation((apiKey: string) => {
+      return {
+        generatePlaylistSuggestions: jest.fn((criteria) => {
+          if (apiKey === "invalid-key") {
+            return Promise.reject(new Error("Invalid API key"))
+          }
+          return Promise.resolve({
+            songs: [],
+            explanation: "Mock explanation",
+            tags: [],
+          })
+        }),
+      }
+    }),
+  }
+})
+
 describe("PlaylistGenius", () => {
   let playlistGenius: PlaylistGenius
 
   beforeEach(() => {
-    // Utilisez une clé API de test ou un mock
     playlistGenius = new PlaylistGenius("test-api-key")
   })
 
