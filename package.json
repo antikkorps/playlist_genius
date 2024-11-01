@@ -1,6 +1,41 @@
 {
+  "name": "playlist-genius",
+  "version": "0.1.0",
+  "description": "AI-powered music playlist generator",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "jest",
+    "prepare": "npm run build"
+  },
+  "keywords": [
+    "playlist",
+    "music",
+    "ai",
+    "recommendation",
+    "spotify"
+  ],
+  "author": "Votre Nom",
+  "license": "MIT",
   "devDependencies": {
+    "@types/jest": "^29.5.14",
     "@types/node": "^22.8.6",
     "typescript": "^5.6.3"
-  }
+  },
+  "dependencies": {
+    "jest": "^29.7.0",
+    "openai": "^4.70.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/antikkorps/playlist_genius"
+  },
+  "bugs": {
+    "url": "https://github.com/antikkorps/playlist_genius/issues"
+  },
+  "homepage": "https://github.com/antikkorps/playlist_genius#readme"
 }
