@@ -28,4 +28,39 @@ export class PlaylistGenius {
     // Implémentation à venir pour trouver des chansons similaires
     return []
   }
+
+  async findSimilarArtists(artist: string): Promise<any> {
+    // Implémentation à venir pour trouver des artistes similaires
+    return []
+  }
+
+  async findPopularSongs(): Promise<any> {
+    // Implémentation à venir pour trouver des chansons populaires
+    return []
+  }
+
+  async findPopularArtists(): Promise<any> {
+    // Implémentation à venir pour trouver des artistes populaires
+    return []
+  }
+
+  async findSongsByGenre(genre: string): Promise<any> {
+    // Implémentation à venir pour trouver des chansons par genre
+    return []
+  }
+
+  async findSongsByMood(mood: string): Promise<any> {
+    // Implémentation à venir pour trouver des chansons par humeur
+    return []
+  }
+
+  async findSongsByTempo(tempo: string): Promise<any> {
+    // Implémentation à venir pour trouver des chansons par tempo
+    return []
+  }
+
+  async findSongsByYear(year: number): Promise<any> {
+    // Implémentation à venir pour trouver des chansons par année
+    return []
+  }
 }
