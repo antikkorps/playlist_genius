@@ -1,8 +1,9 @@
 import OpenAI from "openai"
-import { PlaylistCriteria, GenerationResult } from "../types"
+import { PlaylistCriteria, GenerationResult, SongAnalysis } from "../types"
 
 export class OpenAIService {
   private openai: OpenAI
+  private model: string = "gpt-3.5-turbo"
 
   constructor(apiKey: string) {
     this.openai = new OpenAI({ apiKey })
@@ -43,15 +44,103 @@ export class OpenAIService {
   }
 
   async getPlaylistSuggestions(criteria: PlaylistCriteria): Promise<GenerationResult> {
-    const prompt = await this.generatePlaylistPrompt(criteria)
+    try {
+      const prompt = `Generate a playlist with 5 songs matching these criteria:
+      ${this.formatCriteria(criteria)}
+      
+      Return a JSON object with this exact structure:
+      {
+        "songs": [
+          {
+            "title": "Song Name",
+            "artist": "Artist Name",
+            "genre": ["main genre", "sub genre"],
+            "tempo": 120,
+            "popularity": 85,
+            "year": 2020,
+            "duration": 180
+          }
+        ],
+        "explanation": "Brief explanation of the selection",
+        "tags": ["relevant", "tags"]
+      }`
+
+      const completion = await this.openai.chat.completions.create({
+        model: "gpt-3.5-turbo",
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are a music expert with deep knowledge of various genres, artists, and music history. Generate personalized playlist suggestions based on user criteria.",
+          },
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+        response_format: { type: "json_object" },
+      })
+
+      const response = JSON.parse(completion.choices[0].message.content || "{}")
+
+      // Assurer une structure de retour valide même en cas d'erreur
+      return {
+        songs: response.songs || [],
+        explanation: response.explanation || "Playlist generated based on given criteria",
+        tags: response.tags || [],
+      }
+    } catch (error) {
+      console.error("Error generating playlist suggestions:", error)
+      throw new Error("Failed to generate playlist suggestions")
+    }
+  }
+
+  private formatCriteria(criteria: PlaylistCriteria): string {
+    const parts = []
+
+    if (criteria.genres?.length) {
+      parts.push(`Genres: ${criteria.genres.join(", ")}`)
+    }
+    if (criteria.mood) {
+      parts.push(`Mood: ${criteria.mood}`)
+    }
+    if (criteria.tempo) {
+      parts.push(`Tempo: ${criteria.tempo}`)
+    }
+    if (criteria.popularity) {
+      parts.push(`Popularity: ${criteria.popularity}`)
+    }
+    if (criteria.yearRange) {
+      if (criteria.yearRange.start && criteria.yearRange.end) {
+        parts.push(`Year range: ${criteria.yearRange.start} to ${criteria.yearRange.end}`)
+      } else if (criteria.yearRange.start) {
+        parts.push(`Year: from ${criteria.yearRange.start}`)
+      } else if (criteria.yearRange.end) {
+        parts.push(`Year: until ${criteria.yearRange.end}`)
+      }
+    }
+
+    return parts.join("\n")
+  }
+
+  async analyzeSongDetailed(title: string, artist: string): Promise<SongAnalysis> {
+    const prompt = `Analyze the song "${title}" by ${artist} and provide detailed musical features including:
+    - Genre categories
+    - Mood descriptors
+    - Technical aspects (tempo, key, time signature)
+    - Musical characteristics (energy, danceability, etc.)
+    - Themes
+    - Similar songs
+    - Cultural impact
+
+    Format the response as a structured JSON matching the SongAnalysis interface.`
 
     const completion = await this.openai.chat.completions.create({
       model: "gpt-4-turbo-preview",
       messages: [
         {
           role: "system",
-          content:
-            "You are a music expert with deep knowledge of various genres, artists, and music history. Generate personalized playlist suggestions based on user criteria.",
+          content: "You are a music expert providing detailed song analysis.",
         },
         {
           role: "user",
@@ -61,12 +150,6 @@ export class OpenAIService {
       response_format: { type: "json_object" },
     })
 
-    const response = JSON.parse(completion.choices[0].message.content || "{}")
-
-    return {
-      songs: response.songs,
-      explanation: response.explanation || "",
-      tags: response.tags || [],
-    }
+    return JSON.parse(completion.choices[0].message.content || "{}") as SongAnalysis
   }
 }
