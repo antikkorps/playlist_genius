@@ -1,71 +1,65 @@
 import NodeCache from "node-cache"
-import { PlaylistCriteria, GenerationResult, CacheOptions } from "../types"
+import { CacheKey } from "../types"
 import crypto from "crypto"
 
 export class CacheService {
   private cache: NodeCache
 
-  constructor(options: CacheOptions = {}) {
+  constructor(options: NodeCache.Options = {}) {
     this.cache = new NodeCache({
-      stdTTL: options.stdTTL || 3600, // 1 heure par défaut
-      checkperiod: options.checkperiod || 600, // Vérification toutes les 10 minutes
+      stdTTL: options.stdTTL || 3600,
+      checkperiod: options.checkperiod || 600,
       maxKeys: options.maxKeys || 1000,
-      useClones: false, // Pour des raisons de performance
     })
   }
 
-  private generateCacheKey(criteria: PlaylistCriteria): string {
-    const sortedCriteria = Object.entries(criteria)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .reduce(
-        (obj, [key, value]) => {
-          if (Array.isArray(value)) {
-            obj[key] = [...value].sort()
-          } else {
-            obj[key] = value
-          }
+  private normalizeValue(value: any): any {
+    if (Array.isArray(value)) {
+      // Trie les tableaux pour assurer la cohérence quelle que soit leur ordre
+      return [...value].sort()
+    }
+    if (typeof value === "object" && value !== null) {
+      // Récursivement normalise les objets
+      return Object.keys(value)
+        .sort()
+        .reduce((obj: any, key) => {
+          obj[key] = this.normalizeValue(value[key])
           return obj
-        },
-        {} as Record<string, any>
-      )
-
-    return crypto
-      .createHash("sha256")
-      .update(JSON.stringify(sortedCriteria))
-      .digest("hex")
+        }, {})
+    }
+    return value
   }
 
-  // Récupère un résultat du cache
-  get(criteria: PlaylistCriteria): GenerationResult | undefined {
-    const key = this.generateCacheKey(criteria)
-    return this.cache.get<GenerationResult>(key)
+  private generateCacheKey(key: CacheKey): string {
+    // Normalise la clé avant de la hasher
+    const normalizedKey = {
+      type: key.type,
+      criteria: this.normalizeValue(key.criteria),
+    }
+
+    return crypto.createHash("sha256").update(JSON.stringify(normalizedKey)).digest("hex")
   }
 
-  // Stocke un résultat dans le cache
-  set(criteria: PlaylistCriteria, result: GenerationResult): void {
-    const key = this.generateCacheKey(criteria)
-    this.cache.set(key, result)
+  get<T = any>(key: CacheKey): T | undefined {
+    const hashKey = this.generateCacheKey(key)
+    return this.cache.get<T>(hashKey)
   }
 
-  // Invalide une entrée spécifique
-  invalidate(criteria: PlaylistCriteria): void {
-    const key = this.generateCacheKey(criteria)
-    this.cache.del(key)
+  set<T = any>(key: CacheKey, value: T): void {
+    const hashKey = this.generateCacheKey(key)
+    this.cache.set(hashKey, value)
   }
 
-  // Vide tout le cache
+  invalidate(key: CacheKey): void {
+    const hashKey = this.generateCacheKey(key)
+    this.cache.del(hashKey)
+  }
+
   clear(): void {
     this.cache.flushAll()
   }
 
-  // Obtient des statistiques sur le cache
   getStats() {
-    return {
-      keys: this.cache.keys().length,
-      hits: this.cache.getStats().hits,
-      misses: this.cache.getStats().misses,
-      ksize: this.cache.getStats().ksize,
-      vsize: this.cache.getStats().vsize,
-    }
+    return this.cache.getStats()
   }
 }

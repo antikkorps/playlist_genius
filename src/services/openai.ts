@@ -1,5 +1,5 @@
 import OpenAI from "openai"
-import { PlaylistCriteria, GenerationResult } from "../types"
+import { PlaylistCriteria, GenerationResult, SongAnalysis } from "../types"
 
 export class OpenAIService {
   private openai: OpenAI
@@ -68,5 +68,35 @@ export class OpenAIService {
       explanation: response.explanation || "",
       tags: response.tags || [],
     }
+  }
+
+  async analyzeSongDetailed(title: string, artist: string): Promise<SongAnalysis> {
+    const prompt = `Analyze the song "${title}" by ${artist} and provide detailed musical features including:
+    - Genre categories
+    - Mood descriptors
+    - Technical aspects (tempo, key, time signature)
+    - Musical characteristics (energy, danceability, etc.)
+    - Themes
+    - Similar songs
+    - Cultural impact
+
+    Format the response as a structured JSON matching the SongAnalysis interface.`
+
+    const completion = await this.openai.chat.completions.create({
+      model: "gpt-4-turbo-preview",
+      messages: [
+        {
+          role: "system",
+          content: "You are a music expert providing detailed song analysis.",
+        },
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+      response_format: { type: "json_object" },
+    })
+
+    return JSON.parse(completion.choices[0].message.content || "{}") as SongAnalysis
   }
 }
