@@ -97,6 +97,12 @@ export interface SpotifyCredentials {
   redirectUri?: string
 }
 
+export interface SpotifyAuthTokens {
+  accessToken: string
+  refreshToken: string
+  expiresIn: number
+}
+
 export interface SpotifyTrack {
   id: string
   name: string

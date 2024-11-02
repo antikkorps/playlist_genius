@@ -1,10 +1,5 @@
 import SpotifyWebApi from "spotify-web-api-node"
-import {
-  PlaylistCriteria,
-  SpotifyTrack,
-  SpotifyArtist,
-  SpotifyCredentials,
-} from "../types"
+import { PlaylistCriteria, SpotifyCredentials, SpotifyAuthTokens } from "../types"
 
 export class SpotifyService {
   private spotify: SpotifyWebApi
@@ -18,9 +13,85 @@ export class SpotifyService {
     })
   }
 
+  getAuthorizationUrl(): string {
+    const scopes = [
+      "user-read-private",
+      "user-read-email",
+      "user-top-read",
+      "user-read-recently-played",
+      "playlist-modify-public",
+      "playlist-modify-private",
+      "user-library-read",
+      "user-library-modify",
+    ]
+
+    return this.spotify.createAuthorizeURL(scopes, "state")
+  }
+
+  async getTokens(code: string): Promise<SpotifyAuthTokens> {
+    try {
+      const data = await this.spotify.authorizationCodeGrant(code)
+
+      const tokens = {
+        accessToken: data.body["access_token"],
+        refreshToken: data.body["refresh_token"],
+        expiresIn: data.body["expires_in"],
+      }
+
+      this.setTokens(tokens)
+      return tokens
+    } catch (error) {
+      console.error("Error getting tokens:", error)
+      throw new Error("Failed to get Spotify tokens")
+    }
+  }
+
+  setTokens(tokens: SpotifyAuthTokens): void {
+    this.spotify.setAccessToken(tokens.accessToken)
+    if (tokens.refreshToken) {
+      this.spotify.setRefreshToken(tokens.refreshToken)
+    }
+    this.tokenExpirationTime = Date.now() + tokens.expiresIn * 1000
+  }
+
+  async refreshAccessToken(): Promise<SpotifyAuthTokens> {
+    try {
+      const data = await this.spotify.refreshAccessToken()
+
+      const tokens = {
+        accessToken: data.body["access_token"],
+        refreshToken: this.spotify.getRefreshToken() || "",
+        expiresIn: data.body["expires_in"],
+      }
+
+      this.setTokens(tokens)
+      return tokens
+    } catch (error) {
+      console.error("Error refreshing token:", error)
+      throw new Error("Failed to refresh Spotify token")
+    }
+  }
+
+  async handleAuthCallback(code: string): Promise<SpotifyAuthTokens> {
+    const data = await this.spotify.authorizationCodeGrant(code)
+
+    const tokens = {
+      accessToken: data.body["access_token"],
+      refreshToken: data.body["refresh_token"],
+      expiresIn: data.body["expires_in"],
+    }
+
+    this.setTokens(tokens)
+    return tokens
+  }
+
   private async ensureValidToken(): Promise<void> {
     if (Date.now() > this.tokenExpirationTime) {
-      const data = await this.spotify.clientCredentialsGrant()
+      if (!this.spotify.getRefreshToken()) {
+        throw new Error("No refresh token available. User must re-authenticate.")
+      }
+
+      const data = await this.spotify.refreshAccessToken()
       this.spotify.setAccessToken(data.body["access_token"])
       this.tokenExpirationTime = Date.now() + data.body["expires_in"] * 1000
     }
@@ -38,16 +109,54 @@ export class SpotifyService {
 
   async getTrackFeatures(trackId: string): Promise<SpotifyApi.AudioFeaturesObject> {
     await this.ensureValidToken()
-
-    const response = await this.spotify.getAudioFeaturesForTrack(trackId)
-    return response.body
+    try {
+      const response = await this.spotify.getAudioFeaturesForTrack(trackId)
+      return response.body
+    } catch (error) {
+      console.error("Error getting track features:", error)
+      return {
+        danceability: 0,
+        energy: 0,
+        key: 0,
+        loudness: 0,
+        mode: 0,
+        speechiness: 0,
+        acousticness: 0,
+        instrumentalness: 0,
+        liveness: 0,
+        valence: 0,
+        tempo: 0,
+        type: "audio_features",
+        id: trackId,
+        uri: `spotify:track:${trackId}`,
+        track_href: `https://api.spotify.com/v1/tracks/${trackId}`,
+        analysis_url: "",
+        duration_ms: 0,
+        time_signature: 4,
+      }
+    }
   }
 
   async getArtist(artistId: string): Promise<SpotifyApi.ArtistObjectFull> {
     await this.ensureValidToken()
-
-    const response = await this.spotify.getArtist(artistId)
-    return response.body
+    try {
+      const response = await this.spotify.getArtist(artistId)
+      return response.body
+    } catch (error) {
+      console.error("Error getting artist:", error)
+      return {
+        id: artistId,
+        name: "",
+        type: "artist",
+        uri: `spotify:artist:${artistId}`,
+        genres: [],
+        href: "",
+        external_urls: { spotify: "" },
+        followers: { href: null, total: 0 },
+        images: [],
+        popularity: 0,
+      }
+    }
   }
 
   async getRecommendations(
@@ -140,13 +249,20 @@ export class SpotifyService {
 
   // Nouvelles méthodes pour l'historique d'écoute
   async getUserTopTracks(
-    timeRange: "short_term" | "medium_term" | "long_term" = "medium_term",
+    timeRange: "short_term" | "medium_term" | "long_term",
     limit: number = 50
   ): Promise<SpotifyApi.TrackObjectFull[]> {
     await this.ensureValidToken()
-
-    const response = await this.spotify.getMyTopTracks({ time_range: timeRange, limit })
-    return response.body.items
+    try {
+      const response = await this.spotify.getMyTopTracks({
+        time_range: timeRange,
+        limit,
+      })
+      return response.body.items
+    } catch (error) {
+      console.error("Error getting user top tracks:", error)
+      throw error
+    }
   }
 
   async getRecentlyPlayed(limit: number = 50): Promise<SpotifyApi.PlayHistoryObject[]> {

@@ -10,6 +10,7 @@ import {
   MusicTrend,
   Song,
   SpotifyCredentials,
+  SpotifyAuthTokens,
 } from "./types"
 
 export class PlaylistGenius {
@@ -28,14 +29,6 @@ export class PlaylistGenius {
 
     if (spotifyCredentials) {
       this.spotifyService = new SpotifyService(spotifyCredentials)
-    }
-  }
-
-  private assertSpotifyEnabled(): void {
-    if (!this.spotifyService) {
-      throw new Error(
-        "This feature requires Spotify credentials. Please initialize PlaylistGenius with Spotify credentials."
-      )
     }
   }
 
@@ -67,45 +60,262 @@ export class PlaylistGenius {
     }
   }
 
+  async analyzeSong(title: string, artist: string): Promise<SongAnalysis> {
+    const cached = this.cacheService.get<SongAnalysis>({
+      type: "song_analysis",
+      criteria: { title, artist },
+    })
+
+    if (cached) return cached
+
+    const analysis = await this.musicAnalysisService.analyzeSong(title, artist)
+
+    this.cacheService.set(
+      {
+        type: "song_analysis",
+        criteria: { title, artist },
+      },
+      analysis
+    )
+
+    return analysis
+  }
+
+  async findSimilarSongs(song: {
+    title: string
+    artist: string
+  }): Promise<SongAnalysis[]> {
+    try {
+      const songAnalysis = await this.analyzeSong(song.title, song.artist)
+
+      if (!songAnalysis?.similarSongs) {
+        console.log("No similar songs found")
+        return []
+      }
+
+      const similarSongsAnalyses = await Promise.all(
+        songAnalysis.similarSongs.map(async (songString) => {
+          try {
+            const [title, artist] = songString.split(" by ").map((s) => s.trim())
+            if (!title || !artist) {
+              console.log(`Invalid song format: ${songString}`)
+              return null
+            }
+            return await this.analyzeSong(title, artist)
+          } catch (error) {
+            console.error(`Error analyzing similar song: ${songString}`, error)
+            return null
+          }
+        })
+      )
+
+      return similarSongsAnalyses.filter(
+        (analysis): analysis is SongAnalysis => analysis !== null
+      )
+    } catch (error) {
+      console.error("Error finding similar songs:", error)
+      return []
+    }
+  }
+
+  async findSimilarArtists(artist: string): Promise<Artist[]> {
+    const cached = this.cacheService.get<Artist[]>({
+      type: "similar_artists",
+      criteria: { artist },
+    })
+
+    if (cached) return cached
+
+    const artistAnalysis = await this.musicAnalysisService.analyzeArtist(artist)
+    const similarArtists = await Promise.all(
+      artistAnalysis.similarArtists.map((name) =>
+        this.musicAnalysisService.analyzeArtist(name)
+      )
+    )
+
+    this.cacheService.set(
+      {
+        type: "similar_artists",
+        criteria: { artist },
+      },
+      similarArtists
+    )
+
+    return similarArtists
+  }
+
+  async findPopularSongs(): Promise<GenerationResult> {
+    return this.generatePlaylistSuggestions({
+      popularity: "high",
+      yearRange: {
+        start: new Date().getFullYear() - 1,
+        end: new Date().getFullYear(),
+      },
+    })
+  }
+
+  async findPopularArtists(): Promise<Artist[]> {
+    const result = await this.generatePlaylistSuggestions({
+      popularity: "high",
+    })
+
+    const uniqueArtists = [...new Set(result.songs.map((song) => song.artist))]
+    const artistAnalyses = await Promise.all(
+      uniqueArtists
+        .slice(0, 10)
+        .map((artist) => this.musicAnalysisService.analyzeArtist(artist))
+    )
+
+    return artistAnalyses
+  }
+
+  async findSongsByGenre(genre: string): Promise<GenerationResult> {
+    return this.generatePlaylistSuggestions({ genres: [genre] })
+  }
+
+  async findSongsByMood(mood: string): Promise<GenerationResult> {
+    return this.generatePlaylistSuggestions({ mood })
+  }
+
+  async findSongsByTempo(tempo: "slow" | "medium" | "fast"): Promise<GenerationResult> {
+    return this.generatePlaylistSuggestions({ tempo })
+  }
+
+  async findSongsByYear(year: number): Promise<GenerationResult> {
+    return this.generatePlaylistSuggestions({
+      yearRange: { start: year, end: year },
+    })
+  }
+
+  async analyzeMusicTrend(genre: string): Promise<MusicTrend> {
+    const cached = this.cacheService.get<MusicTrend>({
+      type: "trend",
+      criteria: { genre },
+    })
+
+    if (cached) return cached
+
+    const trend = await this.musicAnalysisService.analyzeTrend(genre)
+
+    this.cacheService.set(
+      {
+        type: "trend",
+        criteria: { genre },
+      },
+      trend
+    )
+
+    return trend
+  }
+
+  async generateMixedPlaylist(
+    songs: { title: string; artist: string }[]
+  ): Promise<GenerationResult> {
+    const analyses = await Promise.all(
+      songs.map((song) => this.analyzeSong(song.title, song.artist))
+    )
+
+    const commonFeatures = {
+      genres: [...new Set(analyses.flatMap((a) => a.features.genre))],
+      mood: [...new Set(analyses.flatMap((a) => a.features.mood))],
+      tempo: analyses.reduce((sum, a) => sum + a.features.tempo, 0) / analyses.length,
+    }
+
+    return this.generatePlaylistSuggestions({
+      genres: commonFeatures.genres,
+      mood: commonFeatures.mood[0],
+      tempo:
+        commonFeatures.tempo > 120
+          ? "fast"
+          : commonFeatures.tempo < 80
+            ? "slow"
+            : "medium",
+    })
+  }
+
+  async findTrendingInGenre(genre: string): Promise<{
+    songs: Song[]
+    artists: Artist[]
+    trend: MusicTrend
+  }> {
+    const trend = await this.analyzeMusicTrend(genre)
+    const artists = await Promise.all(
+      trend.recentArtists
+        .slice(0, 5)
+        .map((artist) => this.musicAnalysisService.analyzeArtist(artist))
+    )
+
+    const playlistResult = await this.findSongsByGenre(genre)
+
+    return {
+      songs: playlistResult.songs,
+      artists,
+      trend,
+    }
+  }
+
+  // Méthodes Spotify
   async generateEnhancedPlaylist(criteria: PlaylistCriteria): Promise<{
     suggestions: GenerationResult
     spotifyTracks?: SpotifyApi.TrackObjectFull[]
   }> {
-    // Obtenir les suggestions de l'IA
-    const suggestions = await this.generatePlaylistSuggestions(criteria)
-
-    if (!this.spotifyService) {
-      return { suggestions }
-    }
-
     try {
-      // Rechercher les chansons sur Spotify
-      const spotifyTracks = await Promise.all(
-        suggestions.songs.map(async (song) => {
+      const suggestions = await this.generatePlaylistSuggestions(criteria)
+
+      if (!this.spotifyService) {
+        return { suggestions }
+      }
+
+      if (!suggestions?.songs) {
+        console.log("No songs in suggestions")
+        return { suggestions }
+      }
+
+      const spotifyTrackPromises = suggestions.songs.map(async (song) => {
+        try {
           const results = await this.spotifyService!.searchTracks(
             `track:${song.title} artist:${song.artist}`,
             1
           )
-          return results[0]
-        })
-      )
+          return results?.[0]
+        } catch (error) {
+          console.error(`Error searching for track: ${song.title}`, error)
+          return null
+        }
+      })
 
-      // Obtenir des recommendations supplémentaires de Spotify
-      const spotifyRecommendations =
-        await this.spotifyService.getRecommendations(criteria)
+      const spotifyTracks = await Promise.all(spotifyTrackPromises)
 
-      // Combiner les résultats et filtrer les undefined
-      const allTracks = [...spotifyTracks, ...spotifyRecommendations].filter(
-        (track): track is SpotifyApi.TrackObjectFull => !!track
-      )
+      try {
+        const spotifyRecommendations =
+          await this.spotifyService.getRecommendations(criteria)
 
-      return {
-        suggestions,
-        spotifyTracks: allTracks,
+        const allTracks = [...spotifyTracks, ...(spotifyRecommendations || [])].filter(
+          (track): track is SpotifyApi.TrackObjectFull => !!track
+        )
+
+        return {
+          suggestions,
+          spotifyTracks: allTracks,
+        }
+      } catch (error) {
+        console.error("Error getting Spotify recommendations:", error)
+        return {
+          suggestions,
+          spotifyTracks: spotifyTracks.filter(
+            (track): track is SpotifyApi.TrackObjectFull => !!track
+          ),
+        }
       }
     } catch (error) {
       console.error("Spotify integration error:", error)
-      return { suggestions }
+      return {
+        suggestions: {
+          songs: [],
+          explanation: "Failed to generate suggestions",
+          tags: [],
+        },
+      }
     }
   }
 
@@ -114,15 +324,15 @@ export class PlaylistGenius {
     playlistName: string,
     tracks: SpotifyApi.TrackObjectFull[]
   ): Promise<string> {
-    this.assertSpotifyEnabled()
-    return this.spotifyService!.createPlaylist(
+    if (!this.spotifyService) {
+      throw new Error("Spotify integration not enabled")
+    }
+    return this.spotifyService.createPlaylist(
       userId,
       playlistName,
       tracks.map((track) => track.id)
     )
   }
-
-  // Nouvelles méthodes utilisant Spotify
 
   async analyzeUserTaste(
     timeRange: "short_term" | "medium_term" | "long_term" = "medium_term"
@@ -146,14 +356,15 @@ export class PlaylistGenius {
       }
     }
   }> {
-    this.assertSpotifyEnabled()
+    if (!this.spotifyService) {
+      throw new Error("Spotify integration not enabled")
+    }
 
-    const topTracks = await this.spotifyService!.getUserTopTracks(timeRange)
+    const topTracks = await this.spotifyService.getUserTopTracks(timeRange)
     const audioFeatures = await Promise.all(
       topTracks.map((track) => this.spotifyService!.getTrackFeatures(track.id))
     )
 
-    // Analyser les caractéristiques
     const analysis = {
       preferredGenres: this.extractGenres(topTracks),
       averageEnergy: this.average(audioFeatures.map((f) => f.energy)),
@@ -170,7 +381,9 @@ export class PlaylistGenius {
   }
 
   async generatePersonalizedPlaylist(userId: string): Promise<GenerationResult> {
-    this.assertSpotifyEnabled()
+    if (!this.spotifyService) {
+      throw new Error("Spotify integration not enabled")
+    }
 
     // Analyser les goûts de l'utilisateur
     const userTaste = await this.analyzeUserTaste()
@@ -187,7 +400,6 @@ export class PlaylistGenius {
   }
 
   // Méthodes utilitaires privées
-
   private average(numbers: number[]): number {
     return numbers.reduce((a, b) => a + b, 0) / numbers.length
   }
@@ -283,5 +495,43 @@ export class PlaylistGenius {
     if (max === profile.sad) return "sad"
     if (max === profile.energetic) return "energetic"
     return "calm"
+  }
+
+  clearCache(): void {
+    this.cacheService.clear()
+  }
+
+  getCacheStats() {
+    return this.cacheService.getStats()
+  }
+
+  getSpotifyAuthUrl(): string {
+    if (!this.spotifyService) {
+      throw new Error("Spotify integration not enabled")
+    }
+    return this.spotifyService.getAuthorizationUrl()
+  }
+
+  async handleSpotifyAuth(code: string): Promise<SpotifyAuthTokens> {
+    if (!this.spotifyService) {
+      throw new Error("Spotify integration not enabled")
+    }
+    const tokens = await this.spotifyService.getTokens(code)
+    this.setSpotifyTokens(tokens)
+    return tokens
+  }
+
+  setSpotifyTokens(tokens: SpotifyAuthTokens): void {
+    if (!this.spotifyService) {
+      throw new Error("Spotify integration not enabled")
+    }
+    this.spotifyService.setTokens(tokens)
+  }
+
+  async refreshSpotifyTokens(): Promise<SpotifyAuthTokens> {
+    if (!this.spotifyService) {
+      throw new Error("Spotify integration not enabled")
+    }
+    return this.spotifyService.refreshAccessToken()
   }
 }
