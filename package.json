@@ -30,7 +30,7 @@
     "recommendation",
     "spotify"
   ],
-  "author": "Votre Nom",
+  "author": "Franck Vienot & Karl Muller",
   "license": "MIT",
   "devDependencies": {
     "@types/jest": "^29.5.14",
