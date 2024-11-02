@@ -13,7 +13,11 @@ npm install playlist-genius
 ```typescript
 import { PlaylistGenius } from "playlist-genius"
 
-const playlistGen = new PlaylistGenius("votre-clé-api")
+const playlistGen = new PlaylistGenius("votre-clé-api", {
+  stdTTL: 7200, // Cache de 2 heures
+  checkperiod: 600, // Nettoyage toutes les 10 minutes
+  maxKeys: 500, // Maximum 500 entrées en cache
+})
 
 // Générer des suggestions de playlist
 const suggestions = await playlistGen.generatePlaylistSuggestions({
@@ -21,6 +25,12 @@ const suggestions = await playlistGen.generatePlaylistSuggestions({
   mood: "energetic",
   tempo: "fast",
 })
+
+// Voir les statistiques du cache
+console.log(playlistGen.getCacheStats())
+
+// Nettoyer le cache si nécessaire
+playlistGen.clearCache()
 ```
 
 ## API
