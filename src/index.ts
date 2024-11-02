@@ -360,24 +360,145 @@ export class PlaylistGenius {
       throw new Error("Spotify integration not enabled")
     }
 
-    const topTracks = await this.spotifyService.getUserTopTracks(timeRange)
-    const audioFeatures = await Promise.all(
-      topTracks.map((track) => this.spotifyService!.getTrackFeatures(track.id))
-    )
+    console.log("Starting user taste analysis...")
 
-    const analysis = {
-      preferredGenres: this.extractGenres(topTracks),
-      averageEnergy: this.average(audioFeatures.map((f) => f.energy)),
-      averageDanceability: this.average(audioFeatures.map((f) => f.danceability)),
-      tempoDistribution: this.analyzeTempoDistribution(audioFeatures),
-      moodProfile: this.analyzeMoodProfile(audioFeatures),
+    try {
+      console.log(`Fetching top tracks for ${timeRange}...`)
+      const topTracks = await this.spotifyService.getUserTopTracks(timeRange, 50)
+      console.log(`Got ${topTracks.length} top tracks`)
+
+      if (topTracks.length === 0) {
+        console.log("Warning: No top tracks found")
+        return this.getDefaultAnalysis()
+      }
+
+      console.log("Fetching audio features...")
+      const audioFeatures = await Promise.all(
+        topTracks.map((track) => {
+          console.log(`Getting features for track: ${track.name}`)
+          return this.spotifyService!.getTrackFeatures(track.id)
+        })
+      )
+      console.log(`Got features for ${audioFeatures.length} tracks`)
+
+      // Initialiser les compteurs
+      let slow = 0,
+        medium = 0,
+        fast = 0
+      let happy = 0,
+        sad = 0,
+        energetic = 0,
+        calm = 0
+      const totalTracks = audioFeatures.length || 1
+
+      audioFeatures.forEach((features) => {
+        // Tempo distribution
+        if (features.tempo < 100) slow++
+        else if (features.tempo < 130) medium++
+        else fast++
+
+        // Mood profile
+        if (features.valence > 0.6) happy++
+        if (features.valence < 0.4) sad++
+        if (features.energy > 0.6) energetic++
+        if (features.energy < 0.4) calm++
+      })
+
+      console.log("Extracting genres...")
+      const genres = await this.extractGenresFromTracks(topTracks)
+      console.log(`Found ${genres.length} unique genres`)
+
+      const analysis = {
+        preferredGenres: genres,
+        averageEnergy: this.average(audioFeatures.map((f) => f.energy)),
+        averageDanceability: this.average(audioFeatures.map((f) => f.danceability)),
+        tempoDistribution: {
+          slow: slow / totalTracks,
+          medium: medium / totalTracks,
+          fast: fast / totalTracks,
+        },
+        moodProfile: {
+          happy: happy / totalTracks,
+          sad: sad / totalTracks,
+          energetic: energetic / totalTracks,
+          calm: calm / totalTracks,
+        },
+      }
+
+      return {
+        topTracks,
+        audioFeatures,
+        analysis,
+      }
+    } catch (error) {
+      console.error("Error in analyzeUserTaste:", error)
+      return this.getDefaultAnalysis()
     }
+  }
 
+  private getDefaultAnalysis() {
     return {
-      topTracks,
-      audioFeatures,
-      analysis,
+      topTracks: [],
+      audioFeatures: [],
+      analysis: {
+        preferredGenres: [],
+        averageEnergy: 0,
+        averageDanceability: 0,
+        tempoDistribution: {
+          slow: 0,
+          medium: 0,
+          fast: 0,
+        },
+        moodProfile: {
+          happy: 0,
+          sad: 0,
+          energetic: 0,
+          calm: 0,
+        },
+      },
     }
+  }
+
+  // Méthode utilitaire pour extraire les genres
+  private async extractGenresFromTracks(
+    tracks: SpotifyApi.TrackObjectFull[]
+  ): Promise<string[]> {
+    if (!this.spotifyService) {
+      return []
+    }
+
+    try {
+      // Récupérer les IDs d'artistes uniques
+      const artistIds = [
+        ...new Set(tracks.flatMap((track) => track.artists.map((artist) => artist.id))),
+      ]
+
+      // Récupérer les détails des artistes
+      const artists = await Promise.all(
+        artistIds.map((id) => this.spotifyService!.getArtist(id))
+      )
+
+      // Compter les occurrences des genres
+      const genreCounts = new Map<string, number>()
+      artists.forEach((artist) => {
+        artist.genres?.forEach((genre) => {
+          genreCounts.set(genre, (genreCounts.get(genre) || 0) + 1)
+        })
+      })
+
+      // Trier les genres par popularité
+      return Array.from(genreCounts.entries())
+        .sort((a, b) => b[1] - a[1])
+        .map(([genre]) => genre)
+    } catch (error) {
+      console.error("Error extracting genres:", error)
+      return []
+    }
+  }
+
+  private average(numbers: number[]): number {
+    if (!numbers.length) return 0
+    return numbers.reduce((sum, num) => sum + num, 0) / numbers.length
   }
 
   async generatePersonalizedPlaylist(userId: string): Promise<GenerationResult> {
@@ -397,11 +518,6 @@ export class PlaylistGenius {
 
     // Générer une playlist basée sur ces critères
     return this.generatePlaylistSuggestions(criteria)
-  }
-
-  // Méthodes utilitaires privées
-  private average(numbers: number[]): number {
-    return numbers.reduce((a, b) => a + b, 0) / numbers.length
   }
 
   private extractGenres(tracks: SpotifyApi.TrackObjectFull[]): string[] {

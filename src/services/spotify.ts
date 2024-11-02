@@ -85,15 +85,23 @@ export class SpotifyService {
     return tokens
   }
 
-  private async ensureValidToken(): Promise<void> {
-    if (Date.now() > this.tokenExpirationTime) {
-      if (!this.spotify.getRefreshToken()) {
+  async ensureValidToken(): Promise<void> {
+    if (Date.now() >= this.tokenExpirationTime) {
+      console.log("Token expired or missing, refreshing...")
+      const refreshToken = this.spotify.getRefreshToken()
+      if (!refreshToken) {
+        console.log("No refresh token available")
         throw new Error("No refresh token available. User must re-authenticate.")
       }
-
-      const data = await this.spotify.refreshAccessToken()
-      this.spotify.setAccessToken(data.body["access_token"])
-      this.tokenExpirationTime = Date.now() + data.body["expires_in"] * 1000
+      try {
+        const data = await this.spotify.refreshAccessToken()
+        this.spotify.setAccessToken(data.body["access_token"])
+        this.tokenExpirationTime = Date.now() + data.body["expires_in"] * 1000
+        console.log("Token refreshed successfully")
+      } catch (error) {
+        console.error("Error refreshing token:", error)
+        throw error
+      }
     }
   }
 
@@ -108,32 +116,15 @@ export class SpotifyService {
   }
 
   async getTrackFeatures(trackId: string): Promise<SpotifyApi.AudioFeaturesObject> {
-    await this.ensureValidToken()
+    console.log(`Getting features for track ${trackId}...`)
     try {
+      await this.ensureValidToken()
       const response = await this.spotify.getAudioFeaturesForTrack(trackId)
+      console.log("Track features retrieved successfully")
       return response.body
-    } catch (error) {
-      console.error("Error getting track features:", error)
-      return {
-        danceability: 0,
-        energy: 0,
-        key: 0,
-        loudness: 0,
-        mode: 0,
-        speechiness: 0,
-        acousticness: 0,
-        instrumentalness: 0,
-        liveness: 0,
-        valence: 0,
-        tempo: 0,
-        type: "audio_features",
-        id: trackId,
-        uri: `spotify:track:${trackId}`,
-        track_href: `https://api.spotify.com/v1/tracks/${trackId}`,
-        analysis_url: "",
-        duration_ms: 0,
-        time_signature: 4,
-      }
+    } catch (error: any) {
+      console.error("Error getting track features:", error.message)
+      throw error
     }
   }
 
@@ -252,15 +243,27 @@ export class SpotifyService {
     timeRange: "short_term" | "medium_term" | "long_term",
     limit: number = 50
   ): Promise<SpotifyApi.TrackObjectFull[]> {
-    await this.ensureValidToken()
+    console.log(`Getting user top tracks for ${timeRange}...`)
     try {
+      await this.ensureValidToken()
+
+      console.log(
+        "Access token:",
+        this.spotify.getAccessToken()?.substring(0, 10) + "..."
+      )
+
       const response = await this.spotify.getMyTopTracks({
         time_range: timeRange,
         limit,
       })
+
+      console.log(`Retrieved ${response.body.items.length} tracks`)
       return response.body.items
-    } catch (error) {
-      console.error("Error getting user top tracks:", error)
+    } catch (error: any) {
+      console.error("Error getting top tracks:", error.message)
+      if (error.statusCode) {
+        console.error("Status code:", error.statusCode)
+      }
       throw error
     }
   }
