@@ -1,13 +1,14 @@
 import { OpenAIService } from "./services/openai"
 import { MusicAnalysisService } from "./services/musicAnalysis"
+import { CacheService } from "./services/cache"
 import {
   PlaylistCriteria,
   GenerationResult,
   SongAnalysis,
   Artist,
   MusicTrend,
+  Song,
 } from "./types"
-import { CacheService } from "./services/cache"
 
 export class PlaylistGenius {
   private openaiService: OpenAIService
@@ -20,21 +21,26 @@ export class PlaylistGenius {
     this.cacheService = new CacheService()
   }
 
-  // Méthode principale de génération de playlist
   async generatePlaylistSuggestions(
     criteria: PlaylistCriteria
   ): Promise<GenerationResult> {
     try {
-      // Vérifier le cache
-      const cacheKey = `playlist_${JSON.stringify(criteria)}`
-      const cached = this.cacheService.get({ type: "playlist", id: cacheKey })
-      if (cached) return cached as GenerationResult
+      const cached = this.cacheService.get<GenerationResult>({
+        type: "playlist",
+        criteria,
+      })
 
-      // Générer les suggestions
+      if (cached) return cached
+
       const result = await this.openaiService.getPlaylistSuggestions(criteria)
 
-      // Stocker dans le cache
-      this.cacheService.set({ type: "playlist", id: cacheKey }, result)
+      this.cacheService.set(
+        {
+          type: "playlist",
+          criteria,
+        },
+        result
+      )
 
       return result
     } catch (error) {
@@ -43,7 +49,6 @@ export class PlaylistGenius {
     }
   }
 
-  // Analyse de chanson
   async analyzeSong(title: string, artist: string): Promise<SongAnalysis> {
     const cached = this.cacheService.get<SongAnalysis>({
       type: "song_analysis",
@@ -52,8 +57,7 @@ export class PlaylistGenius {
 
     if (cached) return cached
 
-    // Utilisation de la méthode spécifique pour l'analyse détaillée
-    const analysis = await this.openaiService.analyzeSongDetailed(title, artist)
+    const analysis = await this.musicAnalysisService.analyzeSong(title, artist)
 
     this.cacheService.set(
       {
@@ -66,26 +70,29 @@ export class PlaylistGenius {
     return analysis
   }
 
-  // Recherche de chansons similaires
   async findSimilarSongs(song: {
     title: string
     artist: string
   }): Promise<SongAnalysis[]> {
-    const analysis = await this.analyzeSong(song.title, song.artist)
-    const similarSongs = await Promise.all(
-      analysis.similarSongs.map(async (songString) => {
-        const [title, artist] = songString.split(" by ")
+    const songAnalysis = await this.analyzeSong(song.title, song.artist)
+
+    const similarSongsAnalyses = await Promise.all(
+      songAnalysis.similarSongs.map(async (songString) => {
+        const [title, artist] = songString.split(" by ").map((s) => s.trim())
         return this.analyzeSong(title, artist)
       })
     )
-    return similarSongs
+
+    return similarSongsAnalyses
   }
 
-  // Recherche d'artistes similaires
   async findSimilarArtists(artist: string): Promise<Artist[]> {
-    const cacheKey = `similar_artists_${artist}`
-    const cached = this.cacheService.get({ type: "similar_artists", id: cacheKey })
-    if (cached) return cached as Artist[]
+    const cached = this.cacheService.get<Artist[]>({
+      type: "similar_artists",
+      criteria: { artist },
+    })
+
+    if (cached) return cached
 
     const artistAnalysis = await this.musicAnalysisService.analyzeArtist(artist)
     const similarArtists = await Promise.all(
@@ -94,11 +101,17 @@ export class PlaylistGenius {
       )
     )
 
-    this.cacheService.set({ type: "similar_artists", id: cacheKey }, similarArtists)
+    this.cacheService.set(
+      {
+        type: "similar_artists",
+        criteria: { artist },
+      },
+      similarArtists
+    )
+
     return similarArtists
   }
 
-  // Recherche des chansons populaires
   async findPopularSongs(): Promise<GenerationResult> {
     return this.generatePlaylistSuggestions({
       popularity: "high",
@@ -109,56 +122,60 @@ export class PlaylistGenius {
     })
   }
 
-  // Recherche des artistes populaires
   async findPopularArtists(): Promise<Artist[]> {
     const result = await this.generatePlaylistSuggestions({
       popularity: "high",
     })
 
     const uniqueArtists = [...new Set(result.songs.map((song) => song.artist))]
-    return Promise.all(
+    const artistAnalyses = await Promise.all(
       uniqueArtists
         .slice(0, 10)
         .map((artist) => this.musicAnalysisService.analyzeArtist(artist))
     )
+
+    return artistAnalyses
   }
 
-  // Recherche par genre
   async findSongsByGenre(genre: string): Promise<GenerationResult> {
     return this.generatePlaylistSuggestions({ genres: [genre] })
   }
 
-  // Recherche par humeur
   async findSongsByMood(mood: string): Promise<GenerationResult> {
     return this.generatePlaylistSuggestions({ mood })
   }
 
-  // Recherche par tempo
-  async findSongsByTempo(tempo: string): Promise<GenerationResult> {
-    return this.generatePlaylistSuggestions({
-      tempo: tempo as "slow" | "medium" | "fast",
-    })
+  async findSongsByTempo(tempo: "slow" | "medium" | "fast"): Promise<GenerationResult> {
+    return this.generatePlaylistSuggestions({ tempo })
   }
 
-  // Recherche par année
   async findSongsByYear(year: number): Promise<GenerationResult> {
     return this.generatePlaylistSuggestions({
       yearRange: { start: year, end: year },
     })
   }
 
-  // Analyse des tendances
   async analyzeMusicTrend(genre: string): Promise<MusicTrend> {
-    const cacheKey = `trend_${genre}`
-    const cached = this.cacheService.get({ type: "trend", id: cacheKey })
-    if (cached) return cached as MusicTrend
+    const cached = this.cacheService.get<MusicTrend>({
+      type: "trend",
+      criteria: { genre },
+    })
+
+    if (cached) return cached
 
     const trend = await this.musicAnalysisService.analyzeTrend(genre)
-    this.cacheService.set({ type: "trend", id: cacheKey }, trend)
+
+    this.cacheService.set(
+      {
+        type: "trend",
+        criteria: { genre },
+      },
+      trend
+    )
+
     return trend
   }
 
-  // Génération de playlist mixte
   async generateMixedPlaylist(
     songs: { title: string; artist: string }[]
   ): Promise<GenerationResult> {
@@ -184,9 +201,8 @@ export class PlaylistGenius {
     })
   }
 
-  // Recherche des tendances par genre
   async findTrendingInGenre(genre: string): Promise<{
-    songs: GenerationResult
+    songs: Song[]
     artists: Artist[]
     trend: MusicTrend
   }> {
@@ -197,11 +213,15 @@ export class PlaylistGenius {
         .map((artist) => this.musicAnalysisService.analyzeArtist(artist))
     )
 
-    const songs = await this.findSongsByGenre(genre)
-    return { songs, artists, trend }
+    const playlistResult = await this.findSongsByGenre(genre)
+
+    return {
+      songs: playlistResult.songs,
+      artists,
+      trend,
+    }
   }
 
-  // Gestion du cache
   clearCache(): void {
     this.cacheService.clear()
   }
