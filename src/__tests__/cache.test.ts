@@ -6,7 +6,7 @@ describe("CacheService", () => {
 
   beforeEach(() => {
     cacheService = new CacheService({
-      stdTTL: 60, // 1 minute pour les tests
+      stdTTL: 60,
       checkperiod: 30,
       maxKeys: 100,
     })
@@ -15,7 +15,7 @@ describe("CacheService", () => {
   const mockCriteria: PlaylistCriteria = {
     genres: ["rock", "indie"],
     mood: "energetic",
-    tempo: "fast",
+    tempo: "fast" as const,
   }
 
   const mockResult: GenerationResult = {
@@ -35,41 +35,111 @@ describe("CacheService", () => {
   }
 
   test("should store and retrieve values", () => {
-    cacheService.set(mockCriteria, mockResult)
-    const cachedResult = cacheService.get(mockCriteria)
+    const cacheKey = {
+      type: "playlist" as const,
+      criteria: mockCriteria,
+    }
+
+    cacheService.set(cacheKey, mockResult)
+    const cachedResult = cacheService.get<GenerationResult>(cacheKey)
     expect(cachedResult).toEqual(mockResult)
   })
 
-  test("should generate consistent cache keys for same criteria with different order", () => {
-    const criteria1: PlaylistCriteria = {
-      genres: ["rock", "indie"],
-      mood: "energetic",
+  test("should handle arrays in different orders", () => {
+    const key1 = {
+      type: "playlist" as const,
+      criteria: {
+        genres: ["rock", "indie"],
+        mood: "energetic",
+      },
     }
 
-    const criteria2: PlaylistCriteria = {
-      mood: "energetic",
-      genres: ["indie", "rock"],
+    const key2 = {
+      type: "playlist" as const,
+      criteria: {
+        genres: ["indie", "rock"],
+        mood: "energetic",
+      },
     }
 
-    cacheService.set(criteria1, mockResult)
-    const cachedResult = cacheService.get(criteria2)
+    cacheService.set(key1, mockResult)
+    const cachedResult = cacheService.get<GenerationResult>(key2)
+    expect(cachedResult).toEqual(mockResult)
+  })
+
+  test("should handle object properties in different orders", () => {
+    const key1 = {
+      type: "playlist" as const,
+      criteria: {
+        genres: ["rock"],
+        mood: "energetic",
+      },
+    }
+
+    const key2 = {
+      type: "playlist" as const,
+      criteria: {
+        mood: "energetic",
+        genres: ["rock"],
+      },
+    }
+
+    cacheService.set(key1, mockResult)
+    const cachedResult = cacheService.get<GenerationResult>(key2)
     expect(cachedResult).toEqual(mockResult)
   })
 
   test("should handle cache invalidation", () => {
-    cacheService.set(mockCriteria, mockResult)
-    cacheService.invalidate(mockCriteria)
-    const cachedResult = cacheService.get(mockCriteria)
+    const cacheKey = {
+      type: "playlist" as const,
+      criteria: mockCriteria,
+    }
+
+    cacheService.set(cacheKey, mockResult)
+    cacheService.invalidate(cacheKey)
+    const cachedResult = cacheService.get<GenerationResult>(cacheKey)
     expect(cachedResult).toBeUndefined()
   })
 
   test("should track cache statistics", () => {
-    cacheService.set(mockCriteria, mockResult)
-    cacheService.get(mockCriteria) // Hit
-    cacheService.get({ genres: ["pop"] }) // Miss
+    const key1 = {
+      type: "playlist" as const,
+      criteria: mockCriteria,
+    }
+
+    const key2 = {
+      type: "playlist" as const,
+      criteria: { genres: ["pop"] },
+    }
+
+    cacheService.set(key1, mockResult)
+    cacheService.get(key1) // Hit
+    cacheService.get(key2) // Miss
 
     const stats = cacheService.getStats()
     expect(stats.hits).toBeGreaterThan(0)
     expect(stats.misses).toBeGreaterThan(0)
+  })
+
+  test("should handle nested arrays and objects", () => {
+    const key1 = {
+      type: "playlist" as const,
+      criteria: {
+        genres: ["rock", "indie"],
+        yearRange: { start: 2020, end: 2024 },
+      },
+    }
+
+    const key2 = {
+      type: "playlist" as const,
+      criteria: {
+        yearRange: { end: 2024, start: 2020 },
+        genres: ["indie", "rock"],
+      },
+    }
+
+    cacheService.set(key1, mockResult)
+    const cachedResult = cacheService.get<GenerationResult>(key2)
+    expect(cachedResult).toEqual(mockResult)
   })
 })
