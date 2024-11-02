@@ -27,3 +27,10 @@ export interface GenerationResult {
   explanation: string
   tags: string[]
 }
+
+// Cache Options
+export interface CacheOptions {
+  stdTTL?: number // Durée de vie en secondes
+  checkperiod?: number // Période de vérification pour le nettoyage
+  maxKeys?: number // Nombre maximum d'entrées
+}
