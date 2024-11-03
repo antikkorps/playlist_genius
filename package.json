@@ -59,7 +59,8 @@
     "node-cache": "^5.1.2",
     "open": "^10.1.0",
     "openai": "^4.70.2",
-    "spotify-web-api-node": "^5.0.2"
+    "spotify-web-api-node": "^5.0.2",
+    "winston": "^3.16.0"
   },
   "repository": {
     "type": "git",

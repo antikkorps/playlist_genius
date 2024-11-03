@@ -1,17 +1,37 @@
 import SpotifyWebApi from "spotify-web-api-node"
-import { PlaylistCriteria, SpotifyCredentials, SpotifyAuthTokens } from "../types"
+import {
+  PlaylistCriteria,
+  SpotifyCredentials,
+  SpotifyAuthTokens,
+  LogLevel,
+} from "../types"
 import { CacheService } from "./cache"
+import { LoggerService, ContextLogger } from "./logger"
 
 export class SpotifyService {
   private spotify: SpotifyWebApi
   private tokenExpirationTime: number = 0
   private retryCount: number = 0
   private readonly MAX_RETRIES: number = 3
+  private logger: ContextLogger
 
   constructor(
     credentials: SpotifyCredentials,
-    private cacheService: CacheService
+    private cacheService: CacheService,
+    loggerService?: LoggerService
   ) {
+    const logger =
+      loggerService ||
+      new LoggerService({
+        level: LogLevel.INFO,
+        consoleOutput: true,
+      })
+
+    this.logger = logger.createContextLogger("SpotifyService")
+    this.logger.info("Initializing Spotify service", {
+      clientId: credentials.clientId,
+      redirectUri: credentials.redirectUri,
+    })
     this.spotify = new SpotifyWebApi({
       clientId: credentials.clientId,
       clientSecret: credentials.clientSecret,
