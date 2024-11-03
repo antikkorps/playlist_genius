@@ -2,6 +2,7 @@ import { PlaylistGenius } from "../index"
 import dotenv from "dotenv"
 import express from "express"
 import { writeFileSync, readFileSync, existsSync } from "fs"
+import { CacheService } from "../services/cache"
 
 dotenv.config()
 
@@ -126,9 +127,20 @@ async function startAuthFlow() {
   if (existsSync(tokenPath)) {
     try {
       const tokens = JSON.parse(readFileSync(tokenPath, "utf8"))
+      console.log("Found existing tokens, attempting to use them...")
+
       playlistGenius.setSpotifyTokens(tokens)
-      await runTests(playlistGenius)
-      return
+      try {
+        // Tenter de rafraîchir le token avant les tests
+        const refreshedTokens = await playlistGenius.refreshSpotifyTokens()
+        console.log("Tokens refreshed successfully")
+        // Sauvegarder les nouveaux tokens
+        writeFileSync(tokenPath, JSON.stringify(refreshedTokens))
+        await runTests(playlistGenius)
+        return
+      } catch (refreshError) {
+        console.log("Failed to refresh tokens, starting new authentication...")
+      }
     } catch (error) {
       console.log("Stored tokens are invalid, starting new authentication...")
     }
@@ -156,24 +168,31 @@ async function startAuthFlow() {
       const tokens = await playlistGenius.handleSpotifyAuth(code)
       console.log("✓ Authentication successful - tokens received")
 
-      writeFileSync(tokenPath, JSON.stringify(tokens))
+      const tokenData = {
+        ...tokens,
+        timestamp: Date.now(),
+      }
+
+      writeFileSync(tokenPath, JSON.stringify(tokenData))
       console.log("✓ Tokens saved to file")
 
       res.send("Authentication successful! You can close this window.")
 
       console.log("🎵 Starting tests sequence...")
-      server.close(() => {
-        console.log("✓ Server closed successfully")
-        runTests(playlistGenius)
-          .then(() => {
-            console.log("✅ Test sequence completed")
-            process.exit(0)
-          })
-          .catch((error) => {
-            console.error("❌ Test sequence failed:", error)
-            process.exit(1)
-          })
-      })
+      setTimeout(() => {
+        server.close(() => {
+          console.log("✓ Server closed successfully")
+          runTests(playlistGenius)
+            .then(() => {
+              console.log("✅ Test sequence completed")
+              process.exit(0)
+            })
+            .catch((error) => {
+              console.error("❌ Test sequence failed:", error)
+              process.exit(1)
+            })
+        })
+      }, 1000)
     } catch (error) {
       console.error("❌ Authentication error:", error)
       res.send("Authentication failed. Please try again.")
