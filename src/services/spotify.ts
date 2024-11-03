@@ -42,26 +42,28 @@ export class SpotifyService {
   private async ensureValidToken(): Promise<void> {
     try {
       if (Date.now() >= this.tokenExpirationTime) {
-        console.log("Token expired or missing, refreshing...")
+        this.logger.info("Token expired or missing, refreshing...")
         const refreshToken = this.spotify.getRefreshToken()
 
         if (!refreshToken) {
-          console.log("No refresh token available, need to re-authenticate")
+          this.logger.warn("No refresh token available, need to re-authenticate")
           throw new Error("Authentication required")
         }
 
         const data = await this.spotify.refreshAccessToken()
         this.spotify.setAccessToken(data.body["access_token"])
         this.tokenExpirationTime = Date.now() + data.body["expires_in"] * 1000
-        this.retryCount = 0 // Réinitialiser le compteur après un succès
-        console.log("Token refreshed successfully")
+        this.retryCount = 0
+        this.logger.info("Token refreshed successfully", {
+          expiresIn: data.body["expires_in"],
+        })
       }
     } catch (error: any) {
-      console.error("Error in ensureValidToken:", error.message)
+      this.logger.error("Error in ensureValidToken", error)
 
       if (this.retryCount < this.MAX_RETRIES) {
         this.retryCount++
-        console.log(`Retry attempt ${this.retryCount}/${this.MAX_RETRIES}`)
+        this.logger.warn(`Retry attempt ${this.retryCount}/${this.MAX_RETRIES}`)
         await new Promise((resolve) => setTimeout(resolve, 1000 * this.retryCount))
         return this.ensureValidToken()
       }
@@ -75,12 +77,16 @@ export class SpotifyService {
       await this.ensureValidToken()
       return await request()
     } catch (error: any) {
-      if (error.statusCode === 401 && this.retryCount < this.MAX_RETRIES) {
+      if (
+        (error.statusCode === 401 || error.statusCode === 429) &&
+        this.retryCount < this.MAX_RETRIES
+      ) {
         this.retryCount++
-        console.log(
+        const delay = 1000 * this.retryCount
+        this.logger.warn(
           `API request failed, retry attempt ${this.retryCount}/${this.MAX_RETRIES}`
         )
-        await new Promise((resolve) => setTimeout(resolve, 1000 * this.retryCount))
+        await new Promise((resolve) => setTimeout(resolve, delay))
         return this.makeSpotifyRequest(request)
       }
       throw error
@@ -99,12 +105,13 @@ export class SpotifyService {
       "user-library-modify",
     ]
 
-    console.log("Requesting scopes:", scopes)
+    this.logger.debug("Requesting scopes:", scopes)
     return this.spotify.createAuthorizeURL(scopes, "state")
   }
 
   async getTokens(code: string): Promise<SpotifyAuthTokens> {
     try {
+      this.logger.debug("Getting tokens with authorization code")
       const data = await this.spotify.authorizationCodeGrant(code)
 
       const tokens = {
@@ -113,24 +120,31 @@ export class SpotifyService {
         expiresIn: data.body["expires_in"],
       }
 
+      this.logger.debug("Getting tokens with authorization code")
       this.setTokens(tokens)
       return tokens
     } catch (error) {
-      console.error("Error getting tokens:", error)
+      this.logger.error("Error getting tokens", error)
       throw new Error("Failed to get Spotify tokens")
     }
   }
 
   setTokens(tokens: SpotifyAuthTokens): void {
+    this.logger.debug("Setting tokens")
     this.spotify.setAccessToken(tokens.accessToken)
     if (tokens.refreshToken) {
       this.spotify.setRefreshToken(tokens.refreshToken)
     }
     this.tokenExpirationTime = Date.now() + tokens.expiresIn * 1000
+    this.logger.debug("Tokens set successfully", {
+      expiresIn: tokens.expiresIn,
+      hasRefreshToken: !!tokens.refreshToken,
+    })
   }
 
   async refreshAccessToken(): Promise<SpotifyAuthTokens> {
     try {
+      this.logger.debug("Refreshing access token")
       const data = await this.spotify.refreshAccessToken()
 
       const tokens = {
@@ -140,9 +154,10 @@ export class SpotifyService {
       }
 
       this.setTokens(tokens)
+      this.logger.info("Access token refreshed successfully")
       return tokens
     } catch (error) {
-      console.error("Error refreshing token:", error)
+      this.logger.error("Error refreshing token", error)
       throw new Error("Failed to refresh Spotify token")
     }
   }
@@ -164,14 +179,27 @@ export class SpotifyService {
     query: string,
     limit: number = 10
   ): Promise<SpotifyApi.TrackObjectFull[]> {
-    await this.ensureValidToken()
+    try {
+      this.logger.debug("Searching tracks", { query, limit })
+      await this.ensureValidToken()
 
-    const response = await this.spotify.searchTracks(query, { limit })
-    return response.body.tracks?.items || []
+      const response = await this.spotify.searchTracks(query, { limit })
+      const tracks = response.body.tracks?.items || []
+
+      this.logger.info("Track search completed", {
+        query,
+        resultsCount: tracks.length,
+      })
+
+      return tracks
+    } catch (error) {
+      this.logger.error("Error searching tracks", error, { query, limit })
+      throw error
+    }
   }
 
   async getTrackFeatures(trackId: string): Promise<SpotifyApi.AudioFeaturesObject> {
-    console.log(`Getting features for track ${trackId}...`)
+    this.logger.debug("Getting track features", { trackId })
     try {
       const cached = this.cacheService?.get<SpotifyApi.AudioFeaturesObject>({
         type: "audio_features",
@@ -179,6 +207,7 @@ export class SpotifyService {
       })
 
       if (cached) {
+        this.logger.debug("Returning cached track features", { trackId })
         return cached
       }
 
@@ -191,10 +220,10 @@ export class SpotifyService {
         },
         response.body
       )
-      console.log("Track features retrieved successfully")
+      this.logger.info("Track features retrieved and cached", { trackId })
       return response.body
     } catch (error: any) {
-      console.error("Error getting track features:", error.message)
+      this.logger.error("Error getting track features", error, { trackId })
       throw error
     }
   }
@@ -205,7 +234,7 @@ export class SpotifyService {
       const response = await this.spotify.getArtist(artistId)
       return response.body
     } catch (error) {
-      console.error("Error getting artist:", error)
+      this.logger.error("Error getting artist:", error)
       return {
         id: artistId,
         name: "",
@@ -314,7 +343,7 @@ export class SpotifyService {
     limit: number = 50
   ): Promise<SpotifyApi.TrackObjectFull[]> {
     return this.makeSpotifyRequest(async () => {
-      console.log(`Getting user top tracks for ${timeRange}...`)
+      this.logger.info(`Getting user top tracks for ${timeRange}...`)
 
       try {
         const topTracks = await this.spotify.getMyTopTracks({
@@ -323,7 +352,7 @@ export class SpotifyService {
         })
 
         if (topTracks.body.items.length === 0) {
-          console.log("No top tracks found, fetching recently played tracks...")
+          this.logger.warn("No top tracks found, fetching recently played tracks...")
           const recentTracks = await this.getRecentlyPlayed(limit)
           const uniqueTracks = new Map<string, SpotifyApi.TrackObjectFull>()
 
@@ -336,13 +365,13 @@ export class SpotifyService {
           const tracks = Array.from(uniqueTracks.values())
           if (tracks.length > 0) return tracks
 
-          console.log("No recent tracks found, getting recommendations...")
+          this.logger.info("No recent tracks found, getting recommendations...")
           return this.getNewUserRecommendations()
         }
 
         return topTracks.body.items
       } catch (error) {
-        console.error("Error in getUserTopTracks:", error)
+        this.logger.error("Error in getUserTopTracks:", error)
         return this.getNewUserRecommendations()
       }
     })
@@ -354,7 +383,7 @@ export class SpotifyService {
       const response = await this.spotify.getMyRecentlyPlayedTracks({ limit })
       return response.body.items
     } catch (error) {
-      console.error("Error getting recently played tracks:", error)
+      this.logger.error("Error getting recently played tracks:", error)
       return []
     }
   }
@@ -375,7 +404,7 @@ export class SpotifyService {
 
         return fullTracksResponse.body.tracks
       } catch (error) {
-        console.error("Error getting new user recommendations:", error)
+        this.logger.error("Error getting new user recommendations:", error)
         return []
       }
     })
