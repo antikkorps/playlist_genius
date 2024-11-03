@@ -77,12 +77,16 @@ export class SpotifyService {
       await this.ensureValidToken()
       return await request()
     } catch (error: any) {
-      if (error.statusCode === 401 && this.retryCount < this.MAX_RETRIES) {
+      if (
+        (error.statusCode === 401 || error.statusCode === 429) &&
+        this.retryCount < this.MAX_RETRIES
+      ) {
         this.retryCount++
+        const delay = 1000 * this.retryCount
         this.logger.warn(
           `API request failed, retry attempt ${this.retryCount}/${this.MAX_RETRIES}`
         )
-        await new Promise((resolve) => setTimeout(resolve, 1000 * this.retryCount))
+        await new Promise((resolve) => setTimeout(resolve, delay))
         return this.makeSpotifyRequest(request)
       }
       throw error

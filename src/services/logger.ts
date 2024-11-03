@@ -5,12 +5,23 @@ import { LoggerConfig, LogLevel } from "../types"
 export class LoggerService {
   private logger: winston.Logger
 
+  private static convertLogLevel(level: LogLevel): string {
+    const levels = {
+      [LogLevel.ERROR]: "error",
+      [LogLevel.WARN]: "warn",
+      [LogLevel.INFO]: "info",
+      [LogLevel.HTTP]: "http",
+      [LogLevel.DEBUG]: "debug",
+    }
+    return levels[level] || "info"
+  }
+
   constructor(config: LoggerConfig) {
     const formats = this.createFormats()
     const transports = this.createTransports(config, formats)
 
     this.logger = winston.createLogger({
-      level: config.level,
+      level: LoggerService.convertLogLevel(config.level),
       levels: winston.config.npm.levels,
       format: formats.combined,
       transports,
