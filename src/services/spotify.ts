@@ -1,5 +1,6 @@
 import SpotifyWebApi from "spotify-web-api-node"
 import { PlaylistCriteria, SpotifyCredentials, SpotifyAuthTokens } from "../types"
+import { CacheService } from "./cache"
 
 export class SpotifyService {
   private spotify: SpotifyWebApi
@@ -7,7 +8,10 @@ export class SpotifyService {
   private retryCount: number = 0
   private readonly MAX_RETRIES: number = 3
 
-  constructor(credentials: SpotifyCredentials) {
+  constructor(
+    credentials: SpotifyCredentials,
+    private cacheService: CacheService
+  ) {
     this.spotify = new SpotifyWebApi({
       clientId: credentials.clientId,
       clientSecret: credentials.clientSecret,
@@ -149,8 +153,24 @@ export class SpotifyService {
   async getTrackFeatures(trackId: string): Promise<SpotifyApi.AudioFeaturesObject> {
     console.log(`Getting features for track ${trackId}...`)
     try {
+      const cached = this.cacheService?.get<SpotifyApi.AudioFeaturesObject>({
+        type: "audio_features",
+        criteria: { trackId },
+      })
+
+      if (cached) {
+        return cached
+      }
+
       await this.ensureValidToken()
       const response = await this.spotify.getAudioFeaturesForTrack(trackId)
+      this.cacheService?.set(
+        {
+          type: "audio_features",
+          criteria: { trackId },
+        },
+        response.body
+      )
       console.log("Track features retrieved successfully")
       return response.body
     } catch (error: any) {
@@ -344,9 +364,45 @@ export class SpotifyService {
   private async getTracksAudioFeatures(
     trackIds: string[]
   ): Promise<SpotifyApi.AudioFeaturesObject[]> {
-    await this.ensureValidToken()
+    const BATCH_SIZE = 100
+    const results: SpotifyApi.AudioFeaturesObject[] = []
 
-    const response = await this.spotify.getAudioFeaturesForTracks(trackIds)
-    return response.body.audio_features
+    // Diviser les trackIds en batches
+    for (let i = 0; i < trackIds.length; i += BATCH_SIZE) {
+      const batch = trackIds.slice(i, i + BATCH_SIZE)
+
+      // Vérifier quels tracks sont déjà en cache
+      const uncachedTracks = batch.filter(
+        (id) =>
+          !this.cacheService?.get({
+            type: "audio_features",
+            criteria: { trackId: id },
+          })
+      )
+
+      if (uncachedTracks.length > 0) {
+        await this.ensureValidToken()
+        const response = await this.spotify.getAudioFeaturesForTracks(uncachedTracks)
+
+        // Mettre en cache les nouveaux résultats
+        response.body.audio_features.forEach((features, index) => {
+          if (features) {
+            this.cacheService?.set(
+              {
+                type: "audio_features",
+                criteria: { trackId: uncachedTracks[index] },
+              },
+              features
+            )
+          }
+        })
+      }
+
+      const batchResults = await Promise.all(batch.map((id) => this.getTrackFeatures(id)))
+
+      results.push(...batchResults)
+    }
+
+    return results
   }
 }

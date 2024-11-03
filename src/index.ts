@@ -1,3 +1,4 @@
+import { CacheKey } from "./types/index"
 import { OpenAIService } from "./services/openai"
 import { MusicAnalysisService } from "./services/musicAnalysis"
 import { SpotifyService } from "./services/spotify"
@@ -28,7 +29,7 @@ export class PlaylistGenius {
     this.cacheService = new CacheService()
 
     if (spotifyCredentials) {
-      this.spotifyService = new SpotifyService(spotifyCredentials)
+      this.spotifyService = new SpotifyService(spotifyCredentials, this.cacheService)
     }
   }
 
@@ -358,6 +359,16 @@ export class PlaylistGenius {
   }> {
     if (!this.spotifyService) {
       throw new Error("Spotify integration not enabled")
+    }
+
+    const CacheKey = {
+      type: "user_taste_analysis",
+      criteria: { timeRange },
+    }
+
+    const cached = this.cacheService.get(CacheKey)
+    if (cached) {
+      return cached
     }
 
     console.log("Starting user taste analysis...")
