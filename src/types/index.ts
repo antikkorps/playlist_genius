@@ -78,6 +78,15 @@ export interface MusicTrend {
   prediction: string
 }
 
+// OpenAI
+
+export interface CustomPromptOptions {
+  systemPrompt?: string
+  temperature?: number
+  maxTokens?: number
+  format?: "json" | "text"
+}
+
 // Cache Options
 export interface CacheOptions {
   stdTTL?: number // Durée de vie en secondes

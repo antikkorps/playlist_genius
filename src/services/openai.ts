@@ -1,5 +1,10 @@
 import OpenAI from "openai"
-import { PlaylistCriteria, GenerationResult, SongAnalysis } from "../types"
+import {
+  PlaylistCriteria,
+  GenerationResult,
+  SongAnalysis,
+  CustomPromptOptions,
+} from "../types"
 
 export class OpenAIService {
   private openai: OpenAI
@@ -151,5 +156,28 @@ export class OpenAIService {
     })
 
     return JSON.parse(completion.choices[0].message.content || "{}") as SongAnalysis
+  }
+
+  async executeCustomPrompt(prompt: string, options: CustomPromptOptions = {}) {
+    const completion = await this.openai.chat.completions.create({
+      model: this.model,
+      messages: [
+        {
+          role: "system",
+          content: options.systemPrompt || "You are a music expert assistant.",
+        },
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+      temperature: options.temperature || 0.7,
+      max_tokens: options.maxTokens,
+      response_format: options.format === "json" ? { type: "json_object" } : undefined,
+    })
+
+    return options.format === "json"
+      ? JSON.parse(completion.choices[0].message.content || "{}")
+      : completion.choices[0].message.content
   }
 }
