@@ -150,3 +150,18 @@ export interface SpotifyAudioFeatures {
   tempo: number
   time_signature: number
 }
+
+// Logger
+export interface LoggerConfig {
+  level: LogLevel
+  filename?: string
+  consoleOutput?: boolean
+}
+
+export enum LogLevel {
+  ERROR = "error",
+  WARN = "warn",
+  INFO = "info",
+  HTTP = "http",
+  DEBUG = "debug",
+}
